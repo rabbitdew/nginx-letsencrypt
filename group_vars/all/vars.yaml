@@ -1,0 +1,7 @@
+default_ubuntu_groups:
+  - adm
+  - cdrom
+  - sudo
+  - dip
+  - plugdev
+  - lxd

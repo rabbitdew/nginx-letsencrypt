@@ -1,0 +1,79 @@
+- name: Run common tasks
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Set system hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+#
+#    - name: Add user accounts
+#      ansible.builtin.user:
+#        name: "{{ item.name }}"
+#        state: present
+#        shell: /bin/bash
+#        groups: "{{ default_ubuntu_groups | join(',') }}"
+#        append: true
+#      loop: "{{ users }}"
+#      tags: adduser
+#
+#    - name: Add ssh keys for users
+#      ansible.posix.authorized_key:
+#        user: "{{ item.name }}"
+#        key: "{{ item.pubkey }}"
+#        state: present
+#      loop: "{{ users }}"
+#      tags: adduser
+#
+#    - name: Configure passwordless sudo for those users
+#      ansible.builtin.copy:
+#        dest: "/etc/sudoers.d/{{ item.name }}"
+#        content: "{{ item.name }} ALL=(ALL) NOPASSWD:ALL"
+#        owner: root
+#        group: root
+#        mode: '0440'
+#      loop: "{{ users }}"
+#
+#    - name: Disable root SSH login
+#      become: true
+#      ansible.builtin.lineinfile:
+#        path: /etc/ssh/sshd_config
+#        regexp: '^#?PermitRootLogin\s+'
+#        line: 'PermitRootLogin no'
+#        state: present
+#        backup: true
+#      notify: Restart SSH
+#
+#    - name: Restrict SSH access to allowed users
+#      become: true
+#      ansible.builtin.lineinfile:
+#        path: /etc/ssh/sshd_config
+#        regexp: '^#?AllowUsers\s+'
+#        line: "AllowUsers {{ users | map(attribute='name') | join(' ') }}"
+#        state: present
+#        backup: true
+#      notify: Restart SSH
+#
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+      tags: apt-upgrade
+
+    - name: apt-get dist-upgrade
+      ansible.builtin.apt:
+        upgrade: dist
+      tags: apt-upgrade
+#
+#    - name: Force reboot after upgrade
+#      ansible.builtin.reboot:
+#        msg: "Forced reboot after dist-upgrade"
+#        pre_reboot_delay: 3
+#        post_reboot_delay: 3
+#        reboot_timeout: 90
+#      tags: reboot
+
+  handlers:
+    - name: Restart SSH
+      ansible.builtin.service:
+        name: ssh
+        state: restarted

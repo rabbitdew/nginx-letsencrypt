@@ -1,0 +1,119 @@
+- name: Install and configure nginx with certbot
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install nginx, certbot, logrotate
+      ansible.builtin.apt:
+        name:
+          - python3-certbot-nginx
+          - nginx
+          - logrotate
+        cache_valid_time: 86400
+        state: present
+      tags: apt
+
+    - name: Ensure nginx is running
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Disable nginx server tokens
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/nginx/nginx.conf
+        regexp: '^\s*server_tokens\s+'
+        line: '    server_tokens off;'
+        insertafter: 'http {'
+        state: present
+        backup: yes
+      notify: Reload nginx 
+
+    - name: Replace default vhost
+      ansible.builtin.copy:
+        dest: /etc/nginx/sites-available/default
+        content: |
+          server {
+              listen 80 default_server;
+              server_name _;
+              return 444;
+          }
+          server {
+              listen 443 ssl default_server;
+              server_name _;
+              ssl_reject_handshake on;
+          }
+        owner: root
+        mode: '0644'
+      tags: default-vhost
+
+    - name: Enable default vhost config
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/default
+        dest: /etc/nginx/sites-enabled/default
+        state: link
+        force: true
+      notify: Reload nginx
+      tags: default-vhost
+
+    - name: Create simple vhost config for LE
+      ansible.builtin.copy:
+        dest: "/etc/nginx/sites-available/{{ inventory_hostname }}.conf"
+        content: |
+          server {
+              listen 80;
+              server_tokens off;
+              server_name {{ inventory_hostname }};
+
+              location /.well-known/acme-challenge/ {
+                root /var/www/html;
+              }
+          }
+        owner: root
+        mode: '0644'
+        force: false
+
+    - name: Enable simple vhost config for LE
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ inventory_hostname }}.conf"
+        dest: "/etc/nginx/sites-enabled/{{ inventory_hostname }}.conf"
+        state: link
+        force: true
+      notify: Reload nginx
+
+    - name: Get existing certbot certificates
+      ansible.builtin.command: certbot certificates
+      register: certbot_certs
+      changed_when: false
+      failed_when: false
+      tags: certbot
+
+    - name: Check if cert for domain already exists
+      ansible.builtin.set_fact:
+        cert_exists: "{{ certbot_certs.stdout is search('Domains:\\s.*\\b' + inventory_hostname + '\\b') }}"
+      tags: certbot
+
+    - name: Obtain and install Let’s Encrypt cert via nginx plugin
+      ansible.builtin.command: >
+        certbot --nginx --non-interactive --agree-tos
+        -d {{ inventory_hostname }} --email {{ le_email }}
+      when: not cert_exists
+      tags: certbot
+
+    - name: Add custom block content to server block in ssl vhost config
+      ansible.builtin.blockinfile:
+        path: "/etc/nginx/sites-available/{{ inventory_hostname }}.conf"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          {{ vhost_block_content | indent(4, true) }}
+        insertafter: '^\s*listen 443 ssl;\s*# managed by Certbot$'
+        backup: true
+      notify: Reload nginx
+      tags: blockinfile
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
